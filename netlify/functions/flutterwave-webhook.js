@@ -1,33 +1,34 @@
-/*
- * Flutterwave webhook.
- *
- * This is the server-side source of truth for marking a consultation paid.
- * Flutterwave recommends verifying critical transaction data rather than
- * trusting a webhook payload by itself.
- */
+// Flutterwave webhook. This is a server-to-server notification endpoint.
+// It verifies the webhook signature and then independently verifies the
+// transaction with Flutterwave before recording a booking.
 
 const crypto = require('crypto');
+
 const EXPECTED_AMOUNT = 25000;
 const EXPECTED_CURRENCY = 'NGN';
+
+function validSignature(event) {
+  const secretHash = process.env.FLW_SECRET_HASH;
+  if (!secretHash) return false;
+
+  const headers = event.headers || {};
+  const signature = headers['flutterwave-signature'] || headers['Flutterwave-Signature'];
+  if (signature) {
+    const digest = crypto.createHmac('sha256', secretHash).update(event.body || '').digest('base64');
+    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+  }
+
+  // Backward-compatible support for Flutterwave's v3 verif-hash header.
+  const legacy = headers['verif-hash'] || headers['Verif-Hash'];
+  return !!legacy && legacy === secretHash;
+}
 
 exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
   }
 
-  const secretHash = process.env.FLW_SECRET_HASH;
-  const signature = event.headers?.['flutterwave-signature'] || event.headers?.['Flutterwave-Signature'];
-
-  if (!secretHash || !signature) {
-    return { statusCode: 401, body: 'Missing webhook signature.' };
-  }
-
-  const expected = crypto
-    .createHmac('sha256', secretHash)
-    .update(event.body || '')
-    .digest('base64');
-
-  if (signature !== expected) {
+  if (!validSignature(event)) {
     return { statusCode: 401, body: 'Invalid webhook signature.' };
   }
 
@@ -38,121 +39,113 @@ exports.handler = async function (event) {
     return { statusCode: 400, body: 'Invalid JSON.' };
   }
 
-  // Current Flutterwave webhook event for completed charges.
-  if (payload.type !== 'charge.completed' || !payload.data) {
+  const data = payload.data || {};
+  const transactionId = data.id;
+  const eventType = payload.type || payload.event;
+
+  if (!transactionId || (eventType && !['charge.completed', 'charge.success'].includes(eventType))) {
     return { statusCode: 200, body: 'Event ignored.' };
   }
 
-  const data = payload.data;
-  const txRef = data.reference;
+  const secretKey = process.env.FLW_SECRET_KEY;
+  if (!secretKey) {
+    console.error('FLW_SECRET_KEY is missing.');
+    return { statusCode: 500, body: 'Payment configuration missing.' };
+  }
 
   try {
-    // Verify against Flutterwave's API before recording the booking.
-    const verifyRes = await fetch(
-      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    const verifyRes = await fetch(`https://api.flutterwave.com/v3/transactions/${encodeURIComponent(transactionId)}/verify`, {
+      headers: { Authorization: `Bearer ${secretKey}` }
+    });
     const verifyJson = await verifyRes.json();
-    const verified = verifyRes.ok &&
-      verifyJson.status === 'success' &&
-      verifyJson.data?.status === 'successful' &&
-      verifyJson.data?.currency === EXPECTED_CURRENCY &&
-      Number(verifyJson.data?.amount) >= EXPECTED_AMOUNT &&
-      verifyJson.data?.tx_ref === txRef;
+    const verified = verifyJson.data || {};
 
-    if (!verified) {
-      console.warn('Flutterwave webhook received but transaction did not verify:', txRef);
-      return { statusCode: 200, body: 'Payment not verified; event acknowledged.' };
+    const validPayment = verifyJson.status === 'success'
+      && verified.status === 'successful'
+      && Number(verified.amount) === EXPECTED_AMOUNT
+      && verified.currency === EXPECTED_CURRENCY;
+
+    if (!validPayment) {
+      console.warn('Flutterwave webhook payment failed verification.');
+      return { statusCode: 200, body: 'Payment not confirmed.' };
     }
 
-    const meta = data.meta || {};
+    const reference = verified.tx_ref || data.tx_ref;
+    const meta = verified.meta || data.meta || {};
 
-    /* -------------------- mark the slot booked -------------------- */
-    const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY;
-    if (hasSupabase) {
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
       const { createClient } = require('@supabase/supabase-js');
       const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-      const { error } = await supabase.from('bookings').upsert({
-        reference: txRef,
-        slot: meta.slot || null,
-        name: meta.name || data.customer?.name || '',
-        email: meta.email || data.customer?.email || '',
-        phone: meta.phone || data.customer?.phone_number || '',
-        business: meta.business || '',
-        link: meta.link || '',
-        sells: meta.sells || '',
-        age: meta.age || '',
-        reason: meta.reason || '',
-        settled: meta.settled || '',
-        confirmed_by_oops: false
-      }, { onConflict: 'reference' });
+      const { data: existing } = await supabase
+        .from('bookings')
+        .select('reference')
+        .eq('reference', reference)
+        .maybeSingle();
 
-      if (error) throw error;
-    } else {
-      console.warn('flutterwave-webhook: Supabase not configured, booking not persisted.');
-    }
-
-    /* -------------------- send the two emails -------------------- */
-    const hasResend = !!process.env.RESEND_API_KEY;
-    if (hasResend) {
-      try {
-        const { Resend } = require('resend');
-        const resend = new Resend(process.env.RESEND_API_KEY);
-        const notifyEmail = process.env.NOTIFY_EMAIL || 'consult@oopsbranding.com';
-        const customerEmail = meta.email || data.customer?.email;
-        const slotLabel = meta.slot ? `${meta.slot.date} · ${meta.slot.time} WAT` : 'your slot';
-
-        if (customerEmail) {
-          await resend.emails.send({
-            from: 'Oops! <consult@oopsbranding.com>',
-            to: customerEmail,
-            subject: `Locked in: ${slotLabel}`,
-            text: `Your call is booked for ${slotLabel}.\n\nOops will email you within 24 hours to confirm.\n\nReference: ${txRef}`,
-            attachments: [{
-              filename: 'oops-consultation.ics',
-              content: Buffer.from(buildIcs(meta.slot, txRef)).toString('base64')
-            }]
-          });
-        }
-
-        await resend.emails.send({
-          from: 'Oops! Bookings <consult@oopsbranding.com>',
-          to: notifyEmail,
-          subject: `New booking, ${slotLabel}, Ref ${txRef}`,
-          text: [
-            `NEW BOOKING, ${slotLabel}, Ref ${txRef}`,
-            '',
-            `${meta.business || ''}   ${meta.link || ''}`,
-            `${meta.name || ''}  ·  ${customerEmail || ''}`,
-            '',
-            `Sells: ${meta.sells || ''}`,
-            `Been running: ${meta.age || ''}`,
-            `Booked because: ${meta.reason || ''}`,
-            `Wants settled: ${meta.settled || ''}`,
-            '',
-            `Payment: confirmed, ₦${EXPECTED_AMOUNT.toLocaleString('en-NG')}`
-          ].join('\n')
+      if (!existing) {
+        const { error } = await supabase.from('bookings').insert({
+          reference,
+          slot: meta.slot || null,
+          name: meta.name || verified.customer?.name || '',
+          email: meta.email || verified.customer?.email || '',
+          business: meta.business || '',
+          link: meta.link || '',
+          sells: meta.sells || '',
+          age: meta.age || '',
+          reason: meta.reason || '',
+          settled: meta.settled || '',
+          confirmed_by_oops: false
         });
-      } catch (err) {
-        console.error('Email send failed:', err.message);
+        if (error) throw error;
       }
-    } else {
-      console.warn('flutterwave-webhook: RESEND not configured, no emails sent.');
     }
+
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const notifyEmail = process.env.NOTIFY_EMAIL || 'consult@oopsbranding.com';
+      const slotLabel = meta.slot ? `${meta.slot.date} · ${meta.slot.time} WAT` : 'your slot';
+      const customerEmail = meta.email || verified.customer?.email;
+
+      if (customerEmail) {
+        await resend.emails.send({
+          from: 'Oops! <consult@oopsbranding.com>',
+          to: customerEmail,
+          subject: `Locked in: ${slotLabel}`,
+          text: `Your call is booked for ${slotLabel}.\n\nOops will email you within 24 hours to confirm.\n\nReference: ${reference}`,
+          attachments: [{
+            filename: 'oops-consultation.ics',
+            content: Buffer.from(buildIcs(meta.slot, reference)).toString('base64')
+          }]
+        });
+      }
+
+      await resend.emails.send({
+        from: 'Oops! Bookings <consult@oopsbranding.com>',
+        to: notifyEmail,
+        subject: `New booking, ${slotLabel}, Ref ${reference}`,
+        text: [
+          `NEW BOOKING, ${slotLabel}, Ref ${reference}`,
+          '',
+          `${meta.business || ''}   ${meta.link || ''}`,
+          `${meta.name || ''}  ·  ${customerEmail || ''}`,
+          '',
+          `Sells: ${meta.sells || ''}`,
+          `Been running: ${meta.age || ''}`,
+          `Booked because: ${meta.reason || ''}`,
+          `Wants settled: ${meta.settled || ''}`,
+          '',
+          'Payment: confirmed, ₦25,000'
+        ].join('\n')
+      });
+    }
+
+    return { statusCode: 200, body: 'ok' };
   } catch (err) {
-    console.error('Flutterwave webhook processing failed:', err);
-    // Acknowledge only after signature verification; Flutterwave can retry if
-    // downstream services fail. Returning 500 makes that visible to Flutterwave.
+    console.error('Webhook processing failed:', err);
     return { statusCode: 500, body: 'Webhook processing failed.' };
   }
-
-  return { statusCode: 200, body: 'ok' };
 };
 
 function buildIcs(slot, reference) {

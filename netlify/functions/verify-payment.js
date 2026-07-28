@@ -1,67 +1,44 @@
-/*
- * Server-side Flutterwave transaction verification.
- * The browser supplies the transaction ID/reference returned by Flutterwave;
- * this function uses the secret key to verify the payment before the UI calls
- * it successful.
- */
+// Verifies the Flutterwave transaction after the customer returns from checkout.
 
 const EXPECTED_AMOUNT = 25000;
 const EXPECTED_CURRENCY = 'NGN';
 
 exports.handler = async function (event) {
-  if (event.httpMethod !== 'POST') {
+  if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: 'Method not allowed' };
+  }
+
+  const params = event.queryStringParameters || {};
+  const transactionId = params.transaction_id;
+  const txRef = params.tx_ref;
+
+  if (!transactionId || !txRef) {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Missing transaction details.' }) };
   }
 
   const secretKey = process.env.FLW_SECRET_KEY;
   if (!secretKey) {
-    return { statusCode: 503, body: JSON.stringify({ error: 'Flutterwave is not configured yet.' }) };
-  }
-
-  let body;
-  try {
-    body = JSON.parse(event.body || '{}');
-  } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request body.' }) };
-  }
-
-  const transactionId = body.transactionId;
-  const txRef = body.txRef;
-
-  if (!transactionId && !txRef) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Transaction ID or reference is required.' }) };
+    return { statusCode: 500, body: JSON.stringify({ error: 'Flutterwave is not configured.' }) };
   }
 
   try {
-    let url;
-    if (transactionId) {
-      url = `https://api.flutterwave.com/v3/transactions/${encodeURIComponent(transactionId)}/verify`;
-    } else {
-      url = `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`;
-    }
-
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      }
+    const res = await fetch(`https://api.flutterwave.com/v3/transactions/${encodeURIComponent(transactionId)}/verify`, {
+      headers: { Authorization: `Bearer ${secretKey}` }
     });
     const json = await res.json();
-    const data = json.data;
+    const data = json.data || {};
 
-    const valid = res.ok &&
-      json.status === 'success' &&
-      data &&
-      data.status === 'successful' &&
-      data.currency === EXPECTED_CURRENCY &&
-      Number(data.amount) >= EXPECTED_AMOUNT &&
-      (!txRef || data.tx_ref === txRef);
+    const valid = json.status === 'success'
+      && data.status === 'successful'
+      && Number(data.amount) === EXPECTED_AMOUNT
+      && data.currency === EXPECTED_CURRENCY
+      && data.tx_ref === txRef;
 
     if (!valid) {
       return {
-        statusCode: 402,
+        statusCode: 400,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'Payment could not be verified.', status: data?.status || 'unknown' })
+        body: JSON.stringify({ success: false, error: 'Payment could not be verified.' })
       };
     }
 
@@ -69,20 +46,18 @@ exports.handler = async function (event) {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        verified: true,
+        success: true,
         reference: data.tx_ref,
-        transactionId: data.id,
-        amount: data.amount,
-        currency: data.currency,
-        customer: data.customer || null
+        customer: data.customer || {},
+        metadata: data.meta || {}
       })
     };
   } catch (err) {
     console.error('Flutterwave verification failed:', err);
     return {
-      statusCode: 500,
+      statusCode: 502,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Could not verify payment.', detail: err.message })
+      body: JSON.stringify({ error: 'Could not verify payment.' })
     };
   }
 };

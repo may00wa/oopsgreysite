@@ -1,97 +1,317 @@
-/* ==========================================================================
-   create-hold.js
-   Puts a ten minute hold on a slot the moment someone picks it, so two
-   people can never both pay for the same half hour.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oops! Branding Solutions — We find why yours isn't one.</title>
+<meta name="description" content="Book a 30-minute brand consultation. We find out why your brand isn't working — before you spend another naira.">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/favicon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
 
-   DEMO MODE (default): confirms the hold without a real database, and
-   the ten minute countdown runs client side in script.js.
+<!-- ============ NAV ============ -->
+<header class="nav">
+  <a href="#top" class="nav-logo"><img src="assets/logo-white.png" alt="Oops! Branding Solutions"></a>
+  <nav class="nav-links">
+    <a href="#recognize">About</a>
+    <a href="#convert">Approach</a>
+    <a href="#reviews">Reviews</a>
+  </nav>
+  <a href="#" class="btn btn-primary btn-nav" data-open-booking>Book a Consultation</a>
+</header>
 
-   REAL MODE (once SUPABASE_URL and SUPABASE_SERVICE_KEY are set):
-   Writes a row to a "holds" table with an expiry timestamp. Any slot
-   with a live, unexpired hold is treated as unavailable by
-   get-availability.js above.
-   ========================================================================== */
+<!-- ============ HERO — card flip ============ -->
+<section class="hero" id="top">
+  <div class="flip-scene">
+    <div class="flip-card" id="flipCard">
+      <div class="flip-face flip-front">
+        <p>We help businesses<br>build better brands.</p>
+      </div>
+      <div class="flip-face flip-back">
+        <p>We find why<br>yours isn't one.</p>
+      </div>
+    </div>
+  </div>
+  <div class="hero-cue">scroll</div>
+</section>
 
-exports.handler = async function (event) {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method not allowed' };
-  }
+<!-- ============ RECOGNIZE YOURSELF ============ -->
+<section class="symptoms" id="recognize">
 
-  let body;
-  try {
-    body = JSON.parse(event.body || '{}');
-  } catch {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request body.' }) };
-  }
+  <!-- Desktop: spine + horizontal row -->
+  <div class="symptoms-desktop">
+    <div class="spine">RECOGNIZE<br>YOURSELF?</div>
+    <div class="row">
+      <div class="item">
+        <div class="num">01</div>
+        <div class="rule"></div>
+        <p>Your only customers are friends and family that know you on WhatsApp.</p>
+      </div>
+      <div class="item">
+        <div class="num">02</div>
+        <div class="rule"></div>
+        <p>You just spent your money on that cute new paper bag and logo but it's still not attracting customers.</p>
+      </div>
+      <div class="item">
+        <div class="num">03</div>
+        <div class="rule"></div>
+        <p>You dance on TikTok all day, everyday but still not getting customers to buy from you.</p>
+      </div>
+      <div class="item">
+        <div class="num">04</div>
+        <div class="rule"></div>
+        <p>You're tired of doing the same thing everyone else is doing.</p>
+      </div>
+      <div class="item">
+        <div class="num">05</div>
+        <div class="rule"></div>
+        <p>You're doing everything. You just don't know if any of it is working.</p>
+      </div>
+    </div>
+  </div>
 
-  const { slotId } = body;
-  if (!slotId) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'slotId is required.' }) };
-  }
+  <!-- Mobile: stacked stem layout -->
+  <div class="symptoms-mobile">
+    <div class="m-header"><h2>Recognize<br>yourself?</h2></div>
 
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY;
+    <div class="m-item"><div class="stem"></div>
+      <div><div class="m-num">01</div><p>Your only customers are friends and family that know you on WhatsApp.</p></div>
+    </div>
+    <div class="m-item"><div class="stem"></div>
+      <div><div class="m-num">02</div><p>You just spent your money on that cute new paper bag and logo but it's still not attracting customers.</p></div>
+    </div>
+    <div class="m-item"><div class="stem"></div>
+      <div><div class="m-num">03</div><p>You dance on TikTok all day, everyday but still not getting customers to buy from you.</p></div>
+    </div>
+    <div class="m-item"><div class="stem"></div>
+      <div><div class="m-num">04</div><p>You're tired of doing the same thing everyone else is doing.</p></div>
+    </div>
+    <div class="m-item"><div class="stem"></div>
+      <div><div class="m-num">05</div><p>You're doing everything. You just don't know if any of it is working.</p></div>
+    </div>
+  </div>
+</section>
 
-  if (!hasSupabase) {
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'demo', slotId, expiresAt })
-    };
-  }
+<!-- ============ CONVERSION ============ -->
+<section class="convert on-paper" id="convert">
+  <div class="convert-inner">
+    <h2 class="convert-head">
+      One honest conversation.<br>30 minutes before you spend another naira.
+    </h2>
+    <p class="convert-body">
+      Before you design a new logo, shoot another video, print another bag or try another marketing trick, let's find the spot you missed.
+    </p>
+    <p class="convert-body convert-body--bold">
+      You'll leave knowing what's wrong, why it's happening, and what to do about it.
+    </p>
+    <a href="#" class="btn btn-primary" data-open-booking>Book a Consultation</a>
+    <p class="convert-fine">₦25,000 · 30 minutes · one-on-one with Oops!</p>
+  </div>
+</section>
 
-  try {
-    const { createClient } = require('@supabase/supabase-js');
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+<!-- ============ REVIEWS ============ -->
+<section class="reviews" id="reviews">
+  <h2 class="reviews-head">They booked. Here's what happened.</h2>
+  <p class="reviews-sub">Nothing filtered. This is what they actually said afterward.</p>
 
-    // Do not overwrite another person's active hold.
-    const now = new Date().toISOString();
-    const { data: activeHold, error: holdReadError } = await supabase
-      .from('holds')
-      .select('slot_id, expires_at')
-      .eq('slot_id', slotId)
-      .gt('expires_at', now)
-      .maybeSingle();
+  <div class="reviews-grid" id="reviewsGrid"></div>
 
-    if (holdReadError) throw holdReadError;
-    if (activeHold) {
-      return {
-        statusCode: 409,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'That slot is currently being held by another customer.' })
-      };
-    }
+  <button class="btn btn-outline glass" id="openReviewForm">Leave a review</button>
+</section>
 
-    const { data: booked, error: bookingReadError } = await supabase
-      .from('bookings')
-      .select('reference')
-      .filter('slot->>id', 'eq', slotId)
-      .limit(1);
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="footer-logo"><img src="assets/logo-white.png" alt="Oops! Branding Solutions"></div>
 
-    if (bookingReadError) throw bookingReadError;
-    if (booked && booked.length) {
-      return {
-        statusCode: 409,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'That slot has already been booked.' })
-      };
-    }
+  <div class="footer-socials">
+    <a href="https://instagram.com/oopsbranding" target="_blank" rel="noopener">Instagram</a>
+    <a href="https://tiktok.com/@oopsbranding" target="_blank" rel="noopener">TikTok</a>
+    <a href="https://x.com/oopsbrandingHQ" target="_blank" rel="noopener">X</a>
+  </div>
 
-    const { error } = await supabase
-      .from('holds')
-      .upsert({ slot_id: slotId, expires_at: expiresAt }, { onConflict: 'slot_id' });
+  <div class="footer-cta">
+    <a href="#" class="btn btn-primary" data-open-booking>Book a Consultation</a>
+  </div>
 
-    if (error) throw error;
+  <div class="footer-bottom">
+    <p>Oops Branding Solutions Ltd &middot; RC 9644116</p>
+    <p>&copy; <span id="year"></span> Lagos, Nigeria.</p>
+  </div>
+</footer>
 
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'live', slotId, expiresAt })
-    };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: 'Could not hold this slot.', detail: err.message })
-    };
-  }
-};
+<!-- ============ STICKY MOBILE CTA ============ -->
+<div class="sticky-cta">
+  <a href="#" class="btn btn-primary btn-full" data-open-booking>Book a Consultation</a>
+</div>
+
+<!-- ============ REVIEW SUBMISSION MODAL ============ -->
+<div class="modal-overlay" id="reviewModalOverlay">
+  <div class="modal glass" role="dialog" aria-modal="true">
+    <button class="modal-close" id="reviewModalClose" aria-label="Close">&times;</button>
+    <p class="modal-eyebrow">Leave a review</p>
+    <h2 class="modal-title">How did it go?</h2>
+
+    <p class="modal-eyebrow" style="margin-top:0;">Clarity rating</p>
+    <div class="clarity-blocks" id="clarityBlocks">
+      <span class="clarity-block" data-value="1"></span>
+      <span class="clarity-block" data-value="2"></span>
+      <span class="clarity-block" data-value="3"></span>
+      <span class="clarity-block" data-value="4"></span>
+      <span class="clarity-block" data-value="5"></span>
+    </div>
+    <p class="clarity-caption" id="clarityCaption">Tap a block to rate</p>
+
+    <form id="reviewForm" class="q-form">
+      <label class="q-field"><span>Your name</span><input type="text" name="reviewerName" required></label>
+      <label class="q-field"><span>Business name (optional)</span><input type="text" name="reviewerBusiness"></label>
+      <label class="q-field"><span>Tell the next person what happened</span><textarea name="reviewText" rows="4" required></textarea></label>
+      <button class="btn btn-primary btn-full" type="submit">Submit review</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ BOOKING MODAL ============ -->
+<div class="modal-overlay" id="bookingModal">
+  <div class="modal booking-modal glass" role="dialog" aria-modal="true" aria-label="Book your consultation">
+    <div class="modal-topbar">
+      <img src="assets/logo-white.png" alt="Oops!" class="modal-mark">
+      <button class="modal-close" data-close-booking aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-progress"><div class="modal-progress-fill" id="progressFill"></div></div>
+
+    <div class="modal-scroll">
+
+      <!-- SCREEN 1: SLOT -->
+      <section class="b-screen active" data-screen="1">
+        <p class="modal-eyebrow">Step 1 of 5</p>
+        <h2 class="modal-title">Pick your half hour.</h2>
+        <p class="modal-sub">All times shown in West Africa Time (WAT). At least 24 hours out.</p>
+
+        <div id="slotGroups"></div>
+        <p class="b-error" id="slotError" style="display:none;">Pick a slot to continue.</p>
+
+        <div class="b-nav">
+          <span></span>
+          <button class="btn btn-primary" data-next-screen>Continue</button>
+        </div>
+      </section>
+
+      <!-- SCREEN 2: ABOUT YOU -->
+      <section class="b-screen" data-screen="2">
+        <p class="modal-eyebrow">Step 2 of 5</p>
+        <h2 class="modal-title">About you.</h2>
+        <p class="modal-sub">So whoever leads the call knows who they're talking to.</p>
+
+        <form id="bookingFormStep1" class="q-form">
+          <label class="q-field"><span>Full name</span><input type="text" name="name" required></label>
+          <label class="q-field"><span>Email</span><input type="email" name="email" required></label>
+          <label class="q-field"><span>Phone / WhatsApp</span><input type="tel" name="phone" required></label>
+        </form>
+
+        <p class="b-error" id="formError1" style="display:none;">Fill in the fields marked, then continue.</p>
+        <div class="b-nav">
+          <button class="btn btn-outline" data-prev-screen>Back</button>
+          <button class="btn btn-primary" data-next-screen data-validate-form="1">Continue</button>
+        </div>
+      </section>
+
+      <!-- SCREEN 3: THE BUSINESS -->
+      <section class="b-screen" data-screen="3">
+        <p class="modal-eyebrow">Step 3 of 5</p>
+        <h2 class="modal-title">The business.</h2>
+        <p class="modal-sub">Give them something real to prep from.</p>
+
+        <form id="bookingFormStep2" class="q-form">
+          <label class="q-field"><span>Business name</span><input type="text" name="business" required></label>
+          <label class="q-field"><span>Website or social page link</span><input type="url" name="link" placeholder="https://instagram.com/yourbusiness"></label>
+          <label class="q-field"><span>What do you sell, in one line</span><input type="text" name="sells" required></label>
+          <label class="q-field">
+            <span>How long has the business existed</span>
+            <select name="age" required>
+              <option value="">Choose one</option>
+              <option>Not started yet</option>
+              <option>Under a year</option>
+              <option>1 to 3 years</option>
+              <option>Older than 3 years</option>
+            </select>
+          </label>
+
+          <fieldset class="q-field">
+            <span>Why are you booking</span>
+            <div class="b-chip-group" id="reasonChips">
+              <button type="button" class="b-chip" data-chip-value="Everyone's doing the same thing">Everyone's doing the same thing as me</button>
+              <button type="button" class="b-chip" data-chip-value="Spent money, nothing's working">I've spent money and nothing's working</button>
+              <button type="button" class="b-chip" data-chip-value="Don't know what's wrong">I don't know what's actually wrong</button>
+              <button type="button" class="b-chip" data-chip-value="Other">Something else</button>
+            </div>
+            <input type="hidden" name="reason" id="reasonInput" required>
+          </fieldset>
+
+          <label class="q-field"><span>What do you want settled by the end of the call</span><textarea name="settled" rows="3" required></textarea></label>
+        </form>
+
+        <p class="b-error" id="formError2" style="display:none;">Fill in the fields marked, then continue.</p>
+        <div class="b-nav">
+          <button class="btn btn-outline" data-prev-screen>Back</button>
+          <button class="btn btn-primary" data-next-screen data-validate-form="2">Continue</button>
+        </div>
+      </section>
+
+      <!-- SCREEN 4: THE LOCK -->
+      <section class="b-screen" data-screen="4">
+        <p class="modal-eyebrow">Step 4 of 5</p>
+        <h2 class="modal-title">Lock your slot.</h2>
+
+        <div class="b-amount">₦25,000</div>
+        <p class="modal-sub">Thirty minutes. The full cost of the consultation.</p>
+
+        <div class="b-hold glass">
+          <span>Your slot is held for</span>
+          <span class="b-hold-timer" id="holdTimer">10:00</span>
+        </div>
+
+        <p class="b-group-label">Pay with</p>
+        <div class="b-pay-methods">
+          <button type="button" class="b-pay-method active" data-pay-method="card">Card</button>
+          <button type="button" class="b-pay-method" data-pay-method="transfer">Bank transfer</button>
+          <button type="button" class="b-pay-method" data-pay-method="ussd">USSD</button>
+        </div>
+
+        <div class="b-summary glass" id="bookingSummary"></div>
+
+        <div class="b-nav">
+          <button class="btn btn-outline" data-prev-screen>Back</button>
+          <button class="btn btn-primary" id="payButton">Pay and lock slot</button>
+        </div>
+      </section>
+
+      <!-- SCREEN 5: RECEIPT -->
+      <section class="b-screen" data-screen="5">
+        <div class="b-confirm-mark">Locked in.</div>
+        <h2 class="modal-title" id="confirmDatetime" style="text-align:center;"></h2>
+        <p class="b-ref">Reference <span id="confirmRef"></span></p>
+        <p class="modal-sub" style="text-align:center;">
+          Oops will email you at <strong id="confirmEmail"></strong> within 24 hours to confirm your slot.
+        </p>
+        <div class="b-nav">
+          <span></span>
+          <button class="btn btn-primary" data-close-booking>Done</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/config.js"></script>
+<script type="module" src="js/hero.js"></script>
+<script type="module" src="js/reviews.js"></script>
+<script type="module" src="js/booking.js"></script>
+<script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>

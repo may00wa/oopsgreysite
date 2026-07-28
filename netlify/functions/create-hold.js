@@ -44,39 +44,6 @@ exports.handler = async function (event) {
     const { createClient } = require('@supabase/supabase-js');
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-    // Do not overwrite another person's active hold.
-    const now = new Date().toISOString();
-    const { data: activeHold, error: holdReadError } = await supabase
-      .from('holds')
-      .select('slot_id, expires_at')
-      .eq('slot_id', slotId)
-      .gt('expires_at', now)
-      .maybeSingle();
-
-    if (holdReadError) throw holdReadError;
-    if (activeHold) {
-      return {
-        statusCode: 409,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'That slot is currently being held by another customer.' })
-      };
-    }
-
-    const { data: booked, error: bookingReadError } = await supabase
-      .from('bookings')
-      .select('reference')
-      .filter('slot->>id', 'eq', slotId)
-      .limit(1);
-
-    if (bookingReadError) throw bookingReadError;
-    if (booked && booked.length) {
-      return {
-        statusCode: 409,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'That slot has already been booked.' })
-      };
-    }
-
     const { error } = await supabase
       .from('holds')
       .upsert({ slot_id: slotId, expires_at: expiresAt }, { onConflict: 'slot_id' });
