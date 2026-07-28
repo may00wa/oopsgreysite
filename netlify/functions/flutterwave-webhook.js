@@ -1,0 +1,171 @@
+/*
+ * Flutterwave webhook.
+ *
+ * This is the server-side source of truth for marking a consultation paid.
+ * Flutterwave recommends verifying critical transaction data rather than
+ * trusting a webhook payload by itself.
+ */
+
+const crypto = require('crypto');
+const EXPECTED_AMOUNT = 25000;
+const EXPECTED_CURRENCY = 'NGN';
+
+exports.handler = async function (event) {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method not allowed' };
+  }
+
+  const secretHash = process.env.FLW_SECRET_HASH;
+  const signature = event.headers?.['flutterwave-signature'] || event.headers?.['Flutterwave-Signature'];
+
+  if (!secretHash || !signature) {
+    return { statusCode: 401, body: 'Missing webhook signature.' };
+  }
+
+  const expected = crypto
+    .createHmac('sha256', secretHash)
+    .update(event.body || '')
+    .digest('base64');
+
+  if (signature !== expected) {
+    return { statusCode: 401, body: 'Invalid webhook signature.' };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(event.body || '{}');
+  } catch {
+    return { statusCode: 400, body: 'Invalid JSON.' };
+  }
+
+  // Current Flutterwave webhook event for completed charges.
+  if (payload.type !== 'charge.completed' || !payload.data) {
+    return { statusCode: 200, body: 'Event ignored.' };
+  }
+
+  const data = payload.data;
+  const txRef = data.reference;
+
+  try {
+    // Verify against Flutterwave's API before recording the booking.
+    const verifyRes = await fetch(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    const verifyJson = await verifyRes.json();
+    const verified = verifyRes.ok &&
+      verifyJson.status === 'success' &&
+      verifyJson.data?.status === 'successful' &&
+      verifyJson.data?.currency === EXPECTED_CURRENCY &&
+      Number(verifyJson.data?.amount) >= EXPECTED_AMOUNT &&
+      verifyJson.data?.tx_ref === txRef;
+
+    if (!verified) {
+      console.warn('Flutterwave webhook received but transaction did not verify:', txRef);
+      return { statusCode: 200, body: 'Payment not verified; event acknowledged.' };
+    }
+
+    const meta = data.meta || {};
+
+    /* -------------------- mark the slot booked -------------------- */
+    const hasSupabase = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_KEY;
+    if (hasSupabase) {
+      const { createClient } = require('@supabase/supabase-js');
+      const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+
+      const { error } = await supabase.from('bookings').upsert({
+        reference: txRef,
+        slot: meta.slot || null,
+        name: meta.name || data.customer?.name || '',
+        email: meta.email || data.customer?.email || '',
+        phone: meta.phone || data.customer?.phone_number || '',
+        business: meta.business || '',
+        link: meta.link || '',
+        sells: meta.sells || '',
+        age: meta.age || '',
+        reason: meta.reason || '',
+        settled: meta.settled || '',
+        confirmed_by_oops: false
+      }, { onConflict: 'reference' });
+
+      if (error) throw error;
+    } else {
+      console.warn('flutterwave-webhook: Supabase not configured, booking not persisted.');
+    }
+
+    /* -------------------- send the two emails -------------------- */
+    const hasResend = !!process.env.RESEND_API_KEY;
+    if (hasResend) {
+      try {
+        const { Resend } = require('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const notifyEmail = process.env.NOTIFY_EMAIL || 'consult@oopsbranding.com';
+        const customerEmail = meta.email || data.customer?.email;
+        const slotLabel = meta.slot ? `${meta.slot.date} · ${meta.slot.time} WAT` : 'your slot';
+
+        if (customerEmail) {
+          await resend.emails.send({
+            from: 'Oops! <consult@oopsbranding.com>',
+            to: customerEmail,
+            subject: `Locked in: ${slotLabel}`,
+            text: `Your call is booked for ${slotLabel}.\n\nOops will email you within 24 hours to confirm.\n\nReference: ${txRef}`,
+            attachments: [{
+              filename: 'oops-consultation.ics',
+              content: Buffer.from(buildIcs(meta.slot, txRef)).toString('base64')
+            }]
+          });
+        }
+
+        await resend.emails.send({
+          from: 'Oops! Bookings <consult@oopsbranding.com>',
+          to: notifyEmail,
+          subject: `New booking, ${slotLabel}, Ref ${txRef}`,
+          text: [
+            `NEW BOOKING, ${slotLabel}, Ref ${txRef}`,
+            '',
+            `${meta.business || ''}   ${meta.link || ''}`,
+            `${meta.name || ''}  ·  ${customerEmail || ''}`,
+            '',
+            `Sells: ${meta.sells || ''}`,
+            `Been running: ${meta.age || ''}`,
+            `Booked because: ${meta.reason || ''}`,
+            `Wants settled: ${meta.settled || ''}`,
+            '',
+            `Payment: confirmed, ₦${EXPECTED_AMOUNT.toLocaleString('en-NG')}`
+          ].join('\n')
+        });
+      } catch (err) {
+        console.error('Email send failed:', err.message);
+      }
+    } else {
+      console.warn('flutterwave-webhook: RESEND not configured, no emails sent.');
+    }
+  } catch (err) {
+    console.error('Flutterwave webhook processing failed:', err);
+    // Acknowledge only after signature verification; Flutterwave can retry if
+    // downstream services fail. Returning 500 makes that visible to Flutterwave.
+    return { statusCode: 500, body: 'Webhook processing failed.' };
+  }
+
+  return { statusCode: 200, body: 'ok' };
+};
+
+function buildIcs(slot, reference) {
+  const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    `UID:${reference}@oopsbranding.com`,
+    `DTSTAMP:${now}`,
+    'SUMMARY:Oops! consultation',
+    `DESCRIPTION:Reference ${reference}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+}
