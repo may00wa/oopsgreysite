@@ -291,32 +291,37 @@ document.querySelectorAll("[data-pay-method]").forEach(btn => {
 
 // =========================================================
 // PAYMENT
-// PLUG POINT: initialize-payment.js + paystack-webhook.js.
-// Demo mode simulates a short delay then shows the receipt, so
-// the whole flow is testable before Paystack keys exist.
+// PLUG POINT: initialize-payment.js + flutterwave-webhook.js.
+// Flutterwave Test Mode handles the payment. The browser never marks a payment
+// as successful by itself; the return is verified server-side.
 // =========================================================
 const payButton = document.getElementById("payButton");
 payButton.addEventListener("click", async () => {
   payButton.classList.add("is-loading");
   payButton.disabled = true;
-  payButton.textContent = "Processing…";
+  payButton.textContent = "Opening payment…";
 
   try {
     const data = getFormData();
     const payload = { slot: selectedSlot, method: selectedPayMethod, ...data };
+
     const res = await fetch("/.netlify/functions/initialize-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-
     const json = await res.json();
+
     if (!res.ok || !json.authorizationUrl) {
-      throw new Error(json.error || "Could not start payment.");
+      throw new Error(json.error || "Could not open Flutterwave checkout.");
     }
 
-    // Flutterwave handles the payment. The customer returns to this site,
-    // where verify-payment.js checks the final transaction status.
+    sessionStorage.setItem("oopsPendingPayment", JSON.stringify({
+      data,
+      selectedSlot,
+      reference: json.reference
+    }));
+
     window.location.href = json.authorizationUrl;
   } catch (err) {
     console.error(err);
@@ -337,42 +342,30 @@ function showConfirmation(reference, data) {
 }
 
 
-// Flutterwave redirects back here after checkout. Verify the transaction on
-// the server before showing the confirmation screen.
-async function handleFlutterwaveReturn() {
+// Flutterwave returns to the homepage with payment status + transaction details.
+(async function handleFlutterwaveReturn() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("payment") !== "return") return;
 
-  const status = params.get("status");
-  const txRef = params.get("tx_ref");
   const transactionId = params.get("transaction_id");
+  const txRef = params.get("tx_ref");
+  const status = params.get("status");
+  const pendingRaw = sessionStorage.getItem("oopsPendingPayment");
 
-  openBooking();
-
-  if (status !== "successful" || !txRef || !transactionId) {
-    alert("Payment was not completed. Your slot has not been booked.");
-    window.history.replaceState({}, document.title, window.location.pathname);
-    return;
-  }
+  if (status !== "successful" || !transactionId || !txRef || !pendingRaw) return;
 
   try {
-    const res = await fetch(`/.netlify/functions/verify-payment?tx_ref=${encodeURIComponent(txRef)}&transaction_id=${encodeURIComponent(transactionId)}`);
-    const json = await res.json();
-    if (!res.ok || !json.success) throw new Error(json.error || "Payment could not be verified.");
+    const res = await fetch(`/.netlify/functions/verify-payment?transaction_id=${encodeURIComponent(transactionId)}&tx_ref=${encodeURIComponent(txRef)}`);
+    const result = await res.json();
+    if (!res.ok || !result.verified) return;
 
-    const meta = json.metadata || {};
-    selectedSlot = meta.slot || null;
-    const data = {
-      name: meta.name || json.customer?.name || "",
-      email: meta.email || json.customer?.email || "",
-      business: meta.business || ""
-    };
-    showConfirmation(json.reference, data);
+    const pending = JSON.parse(pendingRaw);
+    selectedSlot = pending.selectedSlot;
+    openBooking();
+    showConfirmation(result.reference || txRef, pending.data);
+    sessionStorage.removeItem("oopsPendingPayment");
     window.history.replaceState({}, document.title, window.location.pathname);
   } catch (err) {
-    console.error(err);
-    alert("We couldn't verify the payment yet. Please contact Oops! with your payment reference: " + txRef);
+    console.error("Could not verify returned Flutterwave payment:", err);
   }
-}
-
-document.addEventListener("DOMContentLoaded", handleFlutterwaveReturn);
+})();

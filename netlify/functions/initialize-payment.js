@@ -1,12 +1,22 @@
-// Starts the Oops! ₦25,000 Flutterwave Standard checkout.
-// The secret key stays server-side in Netlify environment variables.
+/*
+ * Creates a Flutterwave Standard Checkout payment.
+ * The browser is redirected to the exact hosted link returned by Flutterwave.
+ */
 
 const AMOUNT = 25000;
-const CURRENCY = 'NGN';
+const SITE_URL = 'https://oops-site.netlify.app';
 
 exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method not allowed' };
+  }
+
+  if (!process.env.FLW_SECRET_KEY) {
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Flutterwave is not configured on this site yet.' })
+    };
   }
 
   let body;
@@ -16,52 +26,32 @@ exports.handler = async function (event) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Invalid request body.' }) };
   }
 
-  const secretKey = process.env.FLW_SECRET_KEY;
-  if (!secretKey) {
-    return {
-      statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Flutterwave is not configured yet.' })
-    };
-  }
-
   if (!body.email || !body.name || !body.slot) {
-    return {
-      statusCode: 400,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Missing booking details.' })
-    };
+    return { statusCode: 400, body: JSON.stringify({ error: 'Missing booking details.' }) };
   }
 
   const txRef = `OOPS-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-  const redirectUrl = `${process.env.SITE_URL || 'https://oops-site.netlify.app'}/?payment=return`;
-
-  const paymentOptions = {
-    card: 'card',
-    transfer: 'banktransfer',
-    ussd: 'ussd'
-  };
 
   const payload = {
     tx_ref: txRef,
     amount: AMOUNT,
-    currency: CURRENCY,
-    redirect_url: redirectUrl,
-    payment_options: paymentOptions[body.method] || 'card, banktransfer, ussd',
+    currency: 'NGN',
+    redirect_url: `${SITE_URL}/?payment=return`,
     customer: {
       email: body.email,
       name: body.name,
-      phonenumber: body.phone || body.phone_number || undefined
+      phonenumber: body.phone || body.phoneNumber || undefined
     },
     customizations: {
       title: 'Oops! Consultation',
-      description: 'One honest conversation, 30 minutes before you spend another naira.'
+      description: '30-minute brand consultation'
     },
+    payment_options: 'card, ussd, banktransfer',
     meta: {
       slot: body.slot,
       name: body.name,
       email: body.email,
-      phone: body.phone || body.phone_number || '',
+      phone: body.phone || body.phoneNumber || '',
       business: body.business || '',
       link: body.link || '',
       sells: body.sells || '',
@@ -71,33 +61,43 @@ exports.handler = async function (event) {
     }
   };
 
+  // Remove undefined values before sending JSON.
+  if (!payload.customer.phonenumber) delete payload.customer.phonenumber;
+
   try {
     const res = await fetch('https://api.flutterwave.com/v3/payments', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${secretKey}`,
+        Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
     });
 
     const json = await res.json();
-    if (!res.ok || json.status !== 'success' || !json.data?.link) {
-      throw new Error(json.message || 'Flutterwave rejected the payment request.');
+
+    if (!res.ok || json.status !== 'success' || !json.data || !json.data.link) {
+      console.error('Flutterwave initialization failed:', JSON.stringify(json));
+      return {
+        statusCode: 502,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: json.message || 'Flutterwave could not create the checkout.' })
+      };
     }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        mode: 'test-or-live',
         reference: txRef,
         authorizationUrl: json.data.link
       })
     };
   } catch (err) {
-    console.error('Flutterwave initialization failed:', err);
+    console.error('Flutterwave request failed:', err);
     return {
-      statusCode: 502,
+      statusCode: 500,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ error: 'Could not start payment.' })
     };
