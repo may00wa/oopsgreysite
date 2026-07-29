@@ -76,22 +76,48 @@ document.querySelectorAll("[data-prev-screen]").forEach(btn =>
 // PLUG POINT: get-availability.js. Demo mode builds a small
 // two-week list right here so the calendar works immediately.
 // =========================================================
+// Minimum notice required before a slot can be booked. Matches the
+// "no one can book less than 24 hours out" rule: if it's 10:00 AM today,
+// the earliest bookable slot is whichever time slot lands at/after
+// 10:00 AM tomorrow — not a fixed set of always-crossed-out slots.
+const LEAD_HOURS = 24;
+
 function buildDemoSlots() {
-  const times = ["9:00 AM", "10:00 AM", "11:00 AM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"];
-  const today = new Date();
+  const times = [
+    { label: "9:00 AM", hour: 9, minute: 0 },
+    { label: "10:00 AM", hour: 10, minute: 0 },
+    { label: "11:00 AM", hour: 11, minute: 0 },
+    { label: "1:00 PM", hour: 13, minute: 0 },
+    { label: "2:00 PM", hour: 14, minute: 0 },
+    { label: "3:00 PM", hour: 15, minute: 0 },
+    { label: "4:00 PM", hour: 16, minute: 0 }
+  ];
+
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + LEAD_HOURS * 60 * 60 * 1000);
+
+  // A couple of slots pre-marked as booked, purely so the demo calendar
+  // doesn't look emptily perfect. This is unrelated to the 24-hour rule
+  // below and just simulates other people's real bookings.
+  const demoBooked = new Set(["1-2-4"]);
+
   const weeks = [];
   for (let g = 0; g < 2; g++) {
     const label = g === 0 ? "This week" : "Next week";
     const days = [];
     for (let d = 0; d < 4; d++) {
-      const date = new Date(today);
-      date.setDate(today.getDate() + (g * 7) + d + 1);
+      // Start from today (offset 0), not tomorrow — whether today's
+      // slots are actually bookable is decided per-slot below by the
+      // 24-hour cutoff, not by skipping the day entirely.
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (g * 7) + d);
       const dayShort = date.toLocaleDateString("en-GB", { weekday: "short" });
       const dateShort = date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
       const fullLabel = date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
       const slots = times.map((t, i) => {
-        const taken = (g === 0 && d === 0 && i < 3) || (g === 0 && d === 1 && i === 4);
-        return { id: `${g}-${d}-${i}`, time: t, taken, fullLabel };
+        const slotDateTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), t.hour, t.minute);
+        const tooSoon = slotDateTime < cutoff;
+        const alreadyBooked = demoBooked.has(`${g}-${d}-${i}`);
+        return { id: `${g}-${d}-${i}`, time: t.label, taken: tooSoon || alreadyBooked, fullLabel };
       });
       days.push({ id: `${g}-${d}`, dayShort, dateShort, fullLabel, slots });
     }

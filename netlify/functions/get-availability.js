@@ -31,10 +31,15 @@ exports.handler = async function () {
     const { createClient } = require('@supabase/supabase-js');
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
+    // Same rule as the demo data: nothing less than 24 hours out is
+    // offered, so this can't be bypassed by calling the function directly.
+    const LEAD_HOURS = 24;
+    const cutoff = new Date(Date.now() + LEAD_HOURS * 60 * 60 * 1000).toISOString();
+
     const { data, error } = await supabase
       .from('slots')
       .select('*')
-      .gte('starts_at', new Date().toISOString())
+      .gte('starts_at', cutoff)
       .order('starts_at', { ascending: true })
       .limit(80);
 
